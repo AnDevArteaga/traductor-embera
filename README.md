@@ -14,7 +14,7 @@ Para clonar el repositorio y configurar el entorno:
 
 ```bash
 # Clonar el repositorio
-git clone https://github.com/tu_usuario/nombre_del_repo.git
+git clone https://github.com/AnDevArteaga/traductor-embera.git
 cd nombre_del_repo
 
 # Instalar dependencias
