@@ -25,7 +25,7 @@
         <v-icon>mdi-logout</v-icon>
       </v-btn>
     </v-app-bar>
-
+    
     <!-- Main content area with gradient background -->
     <div class="background-gradient">
       <v-main>
@@ -79,7 +79,7 @@
                   <v-slide-y-transition>
                     <v-alert
                       v-if="message"
-                      type="success"
+                      :type="messageType"
                       text
                       dense
                       class="mt-4"
@@ -90,7 +90,7 @@
                 </v-card-text>
               </v-card>
             </v-col>
-
+            
             <!-- Words table card -->
             <v-col cols="12" sm="6" md="8" lg="8">
               <v-card
@@ -106,13 +106,25 @@
                   <v-data-table
                     :headers="headers"
                     :items="palabras"
-                    item-key="id"
+                    item-key="espanol"
                     :footer-props="{
                       'items-per-page-options': [5, 10, 15],
                       'items-per-page-text': 'Palabras por página'
                     }"
                     class="elevation-0"
                   >
+                    <!-- Slot corregido para las acciones -->
+                     <!-- eslint-disable-next-line vue/valid-v-slot -->
+                    <template v-slot:item.actions="{ item }">
+                      <v-btn 
+                        icon 
+                        color="red lighten-1" 
+                        @click="confirmDelete(item)"
+                        :disabled="loading"
+                      >
+                        <v-icon>mdi-delete</v-icon>
+                      </v-btn>
+                    </template>
                   </v-data-table>
                 </v-card-text>
               </v-card>
@@ -122,6 +134,40 @@
       </v-main>
     </div>
 
+    <!-- Diálogo de confirmación movido fuera de la tabla -->
+    <v-dialog v-model="dialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title class="text-h6 d-flex align-center">
+          <v-icon color="red" class="mr-2">mdi-alert</v-icon>
+          Confirmar eliminación
+        </v-card-title>
+        <v-card-text v-if="itemToDelete">
+          <p class="mb-2">¿Estás seguro que deseas eliminar esta palabra?</p>
+          <p><strong>Español:</strong> {{ itemToDelete.espanol }}</p>
+          <p><strong>Embera:</strong> {{ itemToDelete.embera }}</p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn 
+            text 
+            color="grey darken-1" 
+            @click="cancelDelete"
+            :disabled="loading"
+          >
+            Cancelar
+          </v-btn>
+          <v-btn 
+            color="red darken-1" 
+            text 
+            @click="deleteWord"
+            :loading="loading"
+          >
+            Eliminar
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+    
     <!-- Footer -->
     <v-footer app color="white" elevation="3" class="px-6 py-3">
       <small class="text-caption grey--text">Traductor Embera © {{ new Date().getFullYear() }}</small>
@@ -150,16 +196,32 @@ export default {
       headers: [
         { text: "Español", value: "espanol", align: "start" },
         { text: "Embera", value: "embera", align: "start" },
+        { text: "Acciones", value: "actions", sortable: false, align: "center" },
       ],
       error: false,
       message: "",
+      messageType: "success",
+      dialog: false,
+      itemToDelete: null,
+      loading: false, // Para controlar el estado de carga
     };
   },
+  
   created() {
     this.checkSession();
     this.fetchWords();
   },
+  
   methods: {
+    // Función para mostrar mensajes y ocultarlos después de un tiempo
+    showMessage(text, type = "success", duration = 3000) {
+      this.message = text;
+      this.messageType = type;
+      setTimeout(() => {
+        this.message = "";
+      }, duration);
+    },
+    
     // Verificar sesión activa
     checkSession() {
       const isLoggedIn = localStorage.getItem("isLoggedIn");
@@ -183,26 +245,70 @@ export default {
     addWord() {
       if (!this.espanol || !this.embera) {
         this.error = true;
+        this.showMessage("Por favor completa todos los campos", "error");
         return;
       }
       
+      this.loading = true;
       const wordData = {
-        espanol: this.espanol,
-        embera: this.embera,
+        espanol: this.espanol.trim(),
+        embera: this.embera.trim(),
       };
       
       axios
         .post("https://edutlasdeveloper.pythonanywhere.com/palabras", { paquete: wordData })
         .then((response) => {
-          this.message = response.data.msge;
+          this.showMessage(response.data.msge || "Palabra guardada exitosamente", "success");
           this.fetchWords();
           this.resetForm();
-          setTimeout(() => {
-            this.message = "";
-          }, 3000);
         })
         .catch((error) => {
-          console.error(error);
+          const errorMessage = error.response?.data?.error || "Ocurrió un error al guardar.";
+          this.showMessage(errorMessage, "error");
+          console.error("Error al guardar:", error);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
+    
+    // Función para confirmar eliminación
+    confirmDelete(item) {
+      this.itemToDelete = { ...item }; // Crear una copia del item
+      this.dialog = true;
+    },
+    
+    // Función para cancelar eliminación
+    cancelDelete() {
+      this.dialog = false;
+      this.itemToDelete = null;
+    },
+    
+    // Función para eliminar palabra
+    deleteWord() {
+      if (!this.itemToDelete) {
+        console.error("No hay item para eliminar");
+        return;
+      }
+      
+      this.loading = true;
+      const wordToDelete = this.itemToDelete.espanol;
+      
+      axios
+        .delete(`https://edutlasdeveloper.pythonanywhere.com/palabras/${encodeURIComponent(wordToDelete)}`)
+        .then(response => {
+          this.showMessage(response.data.msge || "Palabra eliminada exitosamente", "success");
+          this.fetchWords(); // Recargar la lista
+          this.dialog = false;
+          this.itemToDelete = null;
+        })
+        .catch(error => {
+          const errorMessage = error.response?.data?.error || "Error al eliminar la palabra.";
+          this.showMessage(errorMessage, "error");
+          console.error("Error al eliminar:", error);
+        })
+        .finally(() => {
+          this.loading = false;
         });
     },
     
@@ -214,7 +320,8 @@ export default {
           this.palabras = response.data || [];
         })
         .catch((error) => {
-          console.error(error);
+          console.error("Error al cargar palabras:", error);
+          this.showMessage("No se pudieron cargar las palabras.", "error");
         });
     },
     
@@ -239,7 +346,7 @@ export default {
 }
 
 .border-top {
-  border-top: 4px solid var(--v-primary-base);
+  border-top: 4px solid #EF6C00; /* Color naranja oscuro */
 }
 
 .search-field :deep(.v-input__slot) {
